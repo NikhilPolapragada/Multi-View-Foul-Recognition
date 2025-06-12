@@ -1,0 +1,61 @@
+import os
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from models.detr import DETRModel
+from utils.dataset import SoccerNetMVFoulsDataset
+from utils.preprocessing import VideoTransform
+import torch.optim as optim
+
+def train(model, dataloader, criterion, optimizer, device):
+    model.train()
+    total_loss = 0
+    for images, targets in dataloader:
+        images = [img.to(device) for img in images]
+        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+
+        optimizer.zero_grad()
+        outputs = model(images)
+
+        loss_dict = criterion(outputs, targets)
+        losses = sum(loss for loss in loss_dict.values())
+
+        losses.backward()
+        optimizer.step()
+
+        total_loss += losses.item()
+    return total_loss / len(dataloader)
+
+def main():
+    data_root = 'data'
+    batch_size = 2
+    num_epochs = 10
+    learning_rate = 1e-4
+    num_classes = 5  # 4 classes + background
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
+
+    transform = VideoTransform()
+    dataset = SoccerNetMVFoulsDataset(root_dir=data_root, split='train', transform=transform)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=lambda x: tuple(zip(*x)))
+
+    model = DETRModel(num_classes=num_classes).to(device)
+
+    # Use a dummy loss function placeholder — you should replace with actual DETR loss (Hungarian + bbox loss)
+    class DummyCriterion(nn.Module):
+        def forward(self, outputs, targets):
+            return {"loss_ce": torch.tensor(0.1, requires_grad=True).to(outputs["pred_logits"].device)}
+    
+    criterion = DummyCriterion()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+    os.makedirs('checkpoints', exist_ok=True)
+
+    for epoch in range(num_epochs):
+        loss = train(model, dataloader, criterion, optimizer, device)
+        print(f"Epoch {epoch+1}/{num_epochs} - Loss: {loss:.4f}")
+        torch.save(model.state_dict(), f'checkpoints/detr_epoch{epoch+1}.pth')
+
+if __name__ == "__main__":
+    main()
+
